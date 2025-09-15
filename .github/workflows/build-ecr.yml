@@ -21,7 +21,7 @@ jobs:
         include:
           # cartservice uses a nested Dockerfile
           - service: cartservice
-            context: ./src/cartservice
+            context: ./src/cartservice/src
             dockerfile: ./src/cartservice/src/Dockerfile
 
           # the rest use standard locations
