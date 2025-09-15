@@ -2,58 +2,63 @@ name: Build & Push Online Boutique images to ECR
 
 on:
   push:
-    branches: [ "${{ vars.DEFAULT_BRANCH || 'main' }}" ]
-  workflow_dispatch: {}
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write    # for OIDC
+  contents: read
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  ECR_PREFIX: ${{ vars.ECR_PREFIX }} # set as GH repo variable; fallback below if missing
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID || secrets.AWS_ACCOUNT_ID }}
+  # For simplicity we inline the role; you can move it to a repo secret later
+  ROLE_TO_ASSUME: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID || secrets.AWS_ACCOUNT_ID }}:role/microservices-demo-gh-oidc-ecr
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID || secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
 jobs:
-  build:
+  build-and-push:
+    name: Build & push (${{ matrix.service }})
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # needed for OIDC
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - adservice
+          - cartservice
+          - checkoutservice
+          - currencyservice
+          - emailservice
+          - frontend
+          - paymentservice
+          - productcatalogservice
+          - recommendationservice
+          - shippingservice
 
-      - name: Configure AWS (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Compute ECR prefix (fallback if repo var not set)
-        id: prep
-        run: |
-          ACC_ID=$(aws sts get-caller-identity --query Account --output text)
-          : "${ECR_PREFIX:=${ACC_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/online-boutique/dev}"
-          echo "ECR_PREFIX=${ECR_PREFIX}" >> $GITHUB_OUTPUT
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Login to ECR
+      - name: Set image tags
+        id: meta
         run: |
-          aws ecr get-login-password --region "${AWS_REGION}" \
-            | docker login --username AWS --password-stdin "$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
+          echo "TAG_SHA=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          echo "TAG_LATEST=latest" >> $GITHUB_OUTPUT
 
-      - name: Build & Push (matrix)
-        run: |
-          set -euo pipefail
-          SERVICES="adservice cartservice checkoutservice currencyservice emailservice frontend paymentservice productcatalogservice recommendationservice shippingservice"
-          for SVC in $SERVICES; do
-            IMAGE="${{ steps.prep.outputs.ECR_PREFIX }}/${SVC}"
-            echo "== Building $SVC => $IMAGE =="
-            # Most services have Dockerfile in ./src/<svc> OR root dir names vary across forks.
-            # Try common locations:
-            if [ -f "./src/${SVC}/Dockerfile" ]; then
-              CTX="./src/${SVC}"
-            elif [ -d "./${SVC}" ] && [ -f "./${SVC}/Dockerfile" ]; then
-              CTX="./${SVC}"
-            else
-              echo "::error::Dockerfile for ${SVC} not found"; exit 1
-            fi
-            docker build -t "${IMAGE}:$GITHUB_SHA" -t "${IMAGE}:latest" "${CTX}"
-            docker push "${IMAGE}:$GITHUB_SHA"
-            docker push "${IMAGE}:latest"
-          done
+      - name: Build & push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/online-boutique/dev/${{ matrix.service }}:${{ steps.meta.outputs.TAG_SHA }}
+            ${{ env.ECR_REGISTRY }}/online-boutique/dev/${{ matrix.service }}:${{ steps.meta.outputs.TAG_LATEST }}
