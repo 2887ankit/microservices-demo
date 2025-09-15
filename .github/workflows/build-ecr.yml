@@ -1,61 +1,85 @@
-name: Build & Push Online Boutique images to ECR
+name: Build & push Online Boutique images to ECR
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/build-ecr.yml'
   workflow_dispatch:
 
 permissions:
-  id-token: write
+  id-token: write   # required for OIDC
   contents: read
 
-env:
-  AWS_REGION: us-east-1
-  ROLE_TO_ASSUME: arn:aws:iam::105169652730:role/microservices-demo-gh-oidc-ecr
-  ECR_REGISTRY: 105169652730.dkr.ecr.us-east-1.amazonaws.com
-
 jobs:
-  build-and-push:
-    name: Build & push (${{ matrix.service }})
+  build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - adservice
-          - cartservice
-          - checkoutservice
-          - currencyservice
-          - emailservice
-          - frontend
-          - paymentservice
-          - productcatalogservice
-          - recommendationservice
-          - shippingservice
+        include:
+          # cartservice uses a nested Dockerfile
+          - service: cartservice
+            context: ./src/cartservice
+            dockerfile: ./src/cartservice/src/Dockerfile
+
+          # the rest use standard locations
+          - service: adservice
+            context: ./src/adservice
+            dockerfile: ./src/adservice/Dockerfile
+          - service: checkoutservice
+            context: ./src/checkoutservice
+            dockerfile: ./src/checkoutservice/Dockerfile
+          - service: currencyservice
+            context: ./src/currencyservice
+            dockerfile: ./src/currencyservice/Dockerfile
+          - service: emailservice
+            context: ./src/emailservice
+            dockerfile: ./src/emailservice/Dockerfile
+          - service: frontend
+            context: ./src/frontend
+            dockerfile: ./src/frontend/Dockerfile
+          - service: paymentservice
+            context: ./src/paymentservice
+            dockerfile: ./src/paymentservice/Dockerfile
+          - service: productcatalogservice
+            context: ./src/productcatalogservice
+            dockerfile: ./src/productcatalogservice/Dockerfile
+          - service: recommendationservice
+            context: ./src/recommendationservice
+            dockerfile: ./src/recommendationservice/Dockerfile
+          - service: shippingservice
+            context: ./src/shippingservice
+            dockerfile: ./src/shippingservice/Dockerfile
+
+    env:
+      AWS_REGION: us-east-1
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.GH_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
+        id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set image tags
-        id: meta
-        run: |
-          echo "TAG_SHA=${GITHUB_SHA}" >> ${GITHUB_OUTPUT}
-          echo "TAG_LATEST=latest" >> ${GITHUB_OUTPUT}
+      - name: Set image tag
+        id: sha
+        run: echo "TAG_SHA=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
-      - name: Build & push
+      - name: Build & Push
         uses: docker/build-push-action@v5
         with:
-          context: ./src/${{ matrix.service }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ env.ECR_REGISTRY }}/online-boutique/dev/${{ matrix.service }}:${{ steps.meta.outputs.TAG_SHA }}
-            ${{ env.ECR_REGISTRY }}/online-boutique/dev/${{ matrix.service }}:${{ steps.meta.outputs.TAG_LATEST }}
+            ${{ steps.ecr.outputs.registry }}/online-boutique/dev/${{ matrix.service }}:${{ steps.sha.outputs.TAG_SHA }}
+            ${{ steps.ecr.outputs.registry }}/online-boutique/dev/${{ matrix.service }}:latest
