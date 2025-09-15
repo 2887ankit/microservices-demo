@@ -1,33 +1,25 @@
-name: Build & push Online Boutique images to ECR
+name: Build & Push Online Boutique images to ECR
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'src/**'
-      - '.github/workflows/build-ecr.yml'
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
-  id-token: write   # required for OIDC
   contents: read
+  id-token: write
 
 jobs:
   build:
-    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
         include:
-          # cartservice uses a nested Dockerfile
-          - service: cartservice
-            context: ./src/cartservice/src
-            dockerfile: ./src/cartservice/src/Dockerfile
-
-          # the rest use standard locations
           - service: adservice
             context: ./src/adservice
             dockerfile: ./src/adservice/Dockerfile
+          - service: cartservice
+            context: ./src/cartservice/src
+            dockerfile: ./src/cartservice/src/Dockerfile
           - service: checkoutservice
             context: ./src/checkoutservice
             dockerfile: ./src/checkoutservice/Dockerfile
@@ -52,34 +44,34 @@ jobs:
           - service: shippingservice
             context: ./src/shippingservice
             dockerfile: ./src/shippingservice/Dockerfile
-
+    runs-on: ubuntu-latest
     env:
       AWS_REGION: us-east-1
-
+      ACCOUNT_ID: 105169652730
+      ECR_REGISTRY: 105169652730.dkr.ecr.us-east-1.amazonaws.com
+      REPO_PREFIX: online-boutique/dev
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.GH_OIDC_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::105169652730:role/microservices-demo-gh-oidc-ecr
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set image tag
-        id: sha
-        run: echo "TAG_SHA=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Tag (sha)
+        id: meta
+        run: echo "TAG_SHA=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
 
-      - name: Build & Push
+      - name: Build & push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ steps.ecr.outputs.registry }}/online-boutique/dev/${{ matrix.service }}:${{ steps.sha.outputs.TAG_SHA }}
-            ${{ steps.ecr.outputs.registry }}/online-boutique/dev/${{ matrix.service }}:latest
+            ${{ env.ECR_REGISTRY }}/${{ env.REPO_PREFIX }}/${{ matrix.service }}:${{ steps.meta.outputs.TAG_SHA }}
+            ${{ env.ECR_REGISTRY }}/${{ env.REPO_PREFIX }}/${{ matrix.service }}:latest
