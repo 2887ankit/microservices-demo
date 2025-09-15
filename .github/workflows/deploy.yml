@@ -1,0 +1,56 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: online-boutique-dev-eks
+  NAMESPACE: online-boutique
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::105169652730:role/microservices-demo-gh-oidc-eks
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Update images (all services)
+        shell: bash
+        run: |
+          set -euo pipefail
+          acct=$(aws sts get-caller-identity --query Account --output text)
+          sha="${GITHUB_SHA}"
+          base="${acct}.dkr.ecr.${AWS_REGION}.amazonaws.com/online-boutique/dev"
+
+          for d in adservice cartservice checkoutservice currencyservice emailservice frontend paymentservice productcatalogservice recommendationservice shippingservice; do
+            kubectl -n "$NAMESPACE" set image "deploy/$d" \
+              "$d=${base}/${d}:${sha}" --record
+          done
+
+      - name: Wait for availability (all)
+        run: |
+          set -euo pipefail
+          # Wait until every deployment reports Available
+          kubectl -n "$NAMESPACE" wait deploy --all --for=condition=Available=True --timeout=15m
+
+      - name: Print rollout status (per service)
+        if: always()
+        run: |
+          for d in adservice cartservice checkoutservice currencyservice emailservice frontend paymentservice productcatalogservice recommendationservice shippingservice; do
+            kubectl -n "$NAMESPACE" rollout status "deploy/$d" --timeout=60s || true
+          done
