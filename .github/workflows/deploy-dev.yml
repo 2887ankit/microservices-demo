@@ -1,0 +1,47 @@
+name: deploy-dev
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-east-1
+      EKS_CLUSTER_NAME: online-boutique-dev-eks
+      ACCOUNT_ID: 105169652730
+      ECR_ROOT: 105169652730.dkr.ecr.us-east-1.amazonaws.com/online-boutique/dev
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Assume AWS role via OIDC
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::105169652730:role/microservices-demo-gh-oidc-eks
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Kubeconfig
+      run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+
+    - name: Roll out images (all services -> new SHA)
+      run: |
+        set -euo pipefail
+        NAMESPACE=online-boutique
+        kubectl -n "$NAMESPACE" set image deploy/adservice               server="$ECR_ROOT/adservice:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/cartservice             server="$ECR_ROOT/cartservice:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/checkoutservice         server="$ECR_ROOT/checkoutservice:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/currencyservice         server="$ECR_ROOT/currencyservice:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/emailservice            server="$ECR_ROOT/emailservice:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/frontend                server="$ECR_ROOT/frontend:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/paymentservice          server="$ECR_ROOT/paymentservice:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/productcatalogservice   server="$ECR_ROOT/productcatalogservice:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/recommendationservice   server="$ECR_ROOT/recommendationservice:$IMAGE_TAG"
+        kubectl -n "$NAMESPACE" set image deploy/shippingservice         server="$ECR_ROOT/shippingservice:$IMAGE_TAG"
+
+        # Wait for everything to become Ready
+        kubectl -n "$NAMESPACE" rollout status deploy --timeout=5m
