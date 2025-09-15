@@ -13,6 +13,8 @@ env:
   AWS_REGION: us-east-1
   CLUSTER_NAME: online-boutique-dev-eks
   NAMESPACE: online-boutique
+  ECR_PREFIX: online-boutique/dev
+  ROLE_ARN: arn:aws:iam::105169652730:role/microservices-demo-gh-oidc-eks
 
 jobs:
   deploy:
@@ -23,34 +25,44 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::105169652730:role/microservices-demo-gh-oidc-eks
+          role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
 
-      - name: Update images (all services)
+      - name: Update images (all services, all containers in each deploy)
         shell: bash
         run: |
           set -euo pipefail
           acct=$(aws sts get-caller-identity --query Account --output text)
           sha="${GITHUB_SHA}"
-          base="${acct}.dkr.ecr.${AWS_REGION}.amazonaws.com/online-boutique/dev"
+          base="${acct}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_PREFIX}"
 
-          for d in adservice cartservice checkoutservice currencyservice emailservice frontend paymentservice productcatalogservice recommendationservice shippingservice; do
-            kubectl -n "$NAMESPACE" set image "deploy/$d" \
-              "$d=${base}/${d}:${sha}" --record
+          services=(adservice cartservice checkoutservice currencyservice emailservice \
+                    frontend paymentservice productcatalogservice recommendationservice shippingservice)
+
+          for d in "${services[@]}"; do
+            # *= sets image for ALL containers in the Deployment (handles name mismatches)
+            kubectl -n "$NAMESPACE" set image "deploy/$d" "*=${base}/${d}:${sha}"
           done
 
-      - name: Wait for availability (all)
+      - name: Wait for availability (all deployments)
         run: |
           set -euo pipefail
-          # Wait until every deployment reports Available
           kubectl -n "$NAMESPACE" wait deploy --all --for=condition=Available=True --timeout=15m
 
-      - name: Print rollout status (per service)
+      - name: Print rollout status (per service) - non-blocking
         if: always()
         run: |
-          for d in adservice cartservice checkoutservice currencyservice emailservice frontend paymentservice productcatalogservice recommendationservice shippingservice; do
-            kubectl -n "$NAMESPACE" rollout status "deploy/$d" --timeout=60s || true
+          for d in adservice cartservice checkoutservice currencyservice emailservice \
+                   frontend paymentservice productcatalogservice recommendationservice shippingservice; do
+            kubectl -n "$NAMESPACE" rollout status "deploy/$d" --timeout=90s || true
           done
+
+      - name: If something failed, show quick diagnostics
+        if: failure()
+        run: |
+          kubectl -n "$NAMESPACE" get deploy,pods
+          echo "---- Recent events ----"
+          kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 100 || true
