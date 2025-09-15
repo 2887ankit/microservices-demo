@@ -6,15 +6,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write    # for OIDC
+  id-token: write
   contents: read
 
 env:
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID || secrets.AWS_ACCOUNT_ID }}
-  # For simplicity we inline the role; you can move it to a repo secret later
-  ROLE_TO_ASSUME: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID || secrets.AWS_ACCOUNT_ID }}:role/microservices-demo-gh-oidc-ecr
-  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID || secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+  ROLE_TO_ASSUME: arn:aws:iam::105169652730:role/microservices-demo-gh-oidc-ecr
+  ECR_REGISTRY: 105169652730.dkr.ecr.us-east-1.amazonaws.com
 
 jobs:
   build-and-push:
@@ -45,14 +43,13 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set image tags
         id: meta
         run: |
-          echo "TAG_SHA=${GITHUB_SHA}" >> $GITHUB_OUTPUT
-          echo "TAG_LATEST=latest" >> $GITHUB_OUTPUT
+          echo "TAG_SHA=${GITHUB_SHA}" >> ${GITHUB_OUTPUT}
+          echo "TAG_LATEST=latest" >> ${GITHUB_OUTPUT}
 
       - name: Build & push
         uses: docker/build-push-action@v5
