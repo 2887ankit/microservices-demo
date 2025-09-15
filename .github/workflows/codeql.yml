@@ -20,57 +20,37 @@ jobs:
         with:
           languages: go, javascript, python, java, csharp
 
-      # --- Build Go modules (if any) ---
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      # --- Build Go (best-effort) ---
+      - uses: actions/setup-go@v5
         with: { go-version: "1.22" }
-      - name: Build Go (best-effort)
+      - name: Build Go
         run: |
           set -euo pipefail
-          mapfile -t gomods < <(git ls-files '**/go.mod' || true)
-          for m in "${gomods[@]}"; do
-            dir=$(dirname "$m")
-            echo "[GO] building $dir"
-            (cd "$dir" && go mod download && go build ./...) || true
-          done
+          mapfile -t mods < <(git ls-files '**/go.mod' || true)
+          for m in "${mods[@]}"; do (cd "$(dirname "$m")" && go mod download && go build ./...) || true; done
 
-      # --- Build Java (Maven/Gradle) ---
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - name: Build with Maven (best-effort)
+      # --- Build Java (best-effort) ---
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - name: Build with Maven
         run: |
           set -euo pipefail
           mapfile -t poms < <(git ls-files '**/pom.xml' || true)
-          for p in "${poms[@]}"; do
-            echo "[Maven] building $p"
-            mvn -q -f "$p" -DskipTests package || true
-          done
-      - name: Build with Gradle (best-effort)
+          for p in "${poms[@]}"; do mvn -q -f "$p" -DskipTests package || true; done
+      - name: Build with Gradle
         run: |
           set -euo pipefail
           mapfile -t gradle_wrappers < <(git ls-files '**/gradlew' || true)
-          for g in "${gradle_wrappers[@]}"; do
-            dir=$(dirname "$g")
-            echo "[Gradle] building $dir"
-            (cd "$dir" && chmod +x ./gradlew && ./gradlew build -x test) || true
-          done
+          for g in "${gradle_wrappers[@]}"; do (cd "$(dirname "$g")" && chmod +x ./gradlew && ./gradlew build -x test) || true; done
 
-      # --- Build .NET (cartservice) ---
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      # --- Build .NET (cartservice) best-effort ---
+      - uses: actions/setup-dotnet@v4
         with: { dotnet-version: '9.0.x' }
-      - name: Build .NET (best-effort)
+      - name: Build .NET
         run: |
           set -euo pipefail
           mapfile -t csprojs < <(git ls-files '**/*.csproj' || true)
-          for c in "${csprojs[@]}"; do
-            dir=$(dirname "$c")
-            echo "[DOTNET] building $c"
-            (cd "$dir" && dotnet restore && dotnet build -c Release) || true
-          done
+          for c in "${csprojs[@]}"; do (cd "$(dirname "$c")" && dotnet restore && dotnet build -c Release) || true; done
 
       - uses: github/codeql-action/analyze@v3
         with:
