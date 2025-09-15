@@ -1,0 +1,61 @@
+name: Build & Push Online Boutique images to ECR
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ROLE_TO_ASSUME: arn:aws:iam::105169652730:role/microservices-demo-gh-oidc-ecr
+  ECR_REGISTRY: 105169652730.dkr.ecr.us-east-1.amazonaws.com
+
+jobs:
+  build-and-push:
+    name: Build & push (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - adservice
+          - cartservice
+          - checkoutservice
+          - currencyservice
+          - emailservice
+          - frontend
+          - paymentservice
+          - productcatalogservice
+          - recommendationservice
+          - shippingservice
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tags
+        id: meta
+        run: |
+          echo "TAG_SHA=${GITHUB_SHA}" >> ${GITHUB_OUTPUT}
+          echo "TAG_LATEST=latest" >> ${GITHUB_OUTPUT}
+
+      - name: Build & push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/online-boutique/dev/${{ matrix.service }}:${{ steps.meta.outputs.TAG_SHA }}
+            ${{ env.ECR_REGISTRY }}/online-boutique/dev/${{ matrix.service }}:${{ steps.meta.outputs.TAG_LATEST }}
