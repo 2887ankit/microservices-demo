@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.ROLE_ARN }}
@@ -31,28 +31,23 @@ jobs:
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
 
-      - name: Update images (all services, all containers in each deploy)
-        shell: bash
+      - name: Update images for all deployments
         run: |
           set -euo pipefail
           acct=$(aws sts get-caller-identity --query Account --output text)
           sha="${GITHUB_SHA}"
           base="${acct}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_PREFIX}"
-
-          services=(adservice cartservice checkoutservice currencyservice emailservice \
-                    frontend paymentservice productcatalogservice recommendationservice shippingservice)
-
-          for d in "${services[@]}"; do
-            # *= sets image for ALL containers in the Deployment (handles name mismatches)
+          svcs=(adservice cartservice checkoutservice currencyservice emailservice \
+                frontend paymentservice productcatalogservice recommendationservice shippingservice)
+          for d in "${svcs[@]}"; do
+            # *= applies to ALL containers in the deployment (avoids container name mismatch)
             kubectl -n "$NAMESPACE" set image "deploy/$d" "*=${base}/${d}:${sha}"
           done
 
-      - name: Wait for availability (all deployments)
-        run: |
-          set -euo pipefail
-          kubectl -n "$NAMESPACE" wait deploy --all --for=condition=Available=True --timeout=15m
+      - name: Wait for all deployments Available
+        run: kubectl -n "$NAMESPACE" wait deploy --all --for=condition=Available=True --timeout=15m
 
-      - name: Print rollout status (per service) - non-blocking
+      - name: Rollout status (non-blocking per service)
         if: always()
         run: |
           for d in adservice cartservice checkoutservice currencyservice emailservice \
@@ -60,9 +55,9 @@ jobs:
             kubectl -n "$NAMESPACE" rollout status "deploy/$d" --timeout=90s || true
           done
 
-      - name: If something failed, show quick diagnostics
+      - name: On failure show diagnostics
         if: failure()
         run: |
           kubectl -n "$NAMESPACE" get deploy,pods
-          echo "---- Recent events ----"
-          kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 100 || true
+          echo "---- Events ----"
+          kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 200 || true
